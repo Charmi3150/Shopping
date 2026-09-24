@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Shopmap België</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
+<style>
+  :root{
+    --kleding:#378ADD; --schoenen:#D85A30; --accessoires:#7F77DD; --decoratie:#1D9E75;
+    --bg:#f5f4f1; --panel:#ffffff; --border:#e2e0d8; --border-strong:#c9c6ba;
+    --text:#26221c; --text-muted:#807b6d; --accent:#26221c; --danger:#c0392b;
+    --radius:12px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);}
+  #app{position:fixed;inset:0;display:flex;flex-direction:column;}
+
+  /* Topbar */
+  #topbar{display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--panel);border-bottom:1px solid var(--border);z-index:1200;}
+  #topbar h1{font-size:16px;font-weight:600;margin:0;white-space:nowrap;}
+  #searchBox{flex:1;min-width:0;height:36px;border-radius:var(--radius);border:1px solid var(--border-strong);padding:0 10px;font-size:14px;background:#fbfaf7;}
+  #searchBox:focus{outline:2px solid var(--kleding);}
+  .iconbtn{height:36px;width:36px;flex:none;border-radius:var(--radius);border:1px solid var(--border-strong);background:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;}
+  .iconbtn:active{transform:scale(0.96);}
+  #syncBtn.syncing{animation:spin 1s linear infinite;}
+  @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+
+  /* Filter chips */
+  #filterbar{display:flex;gap:6px;overflow-x:auto;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--border);z-index:1200;-webkit-overflow-scrolling:touch;}
+  #filterbar::-webkit-scrollbar{display:none;}
+  .chip{flex:none;display:flex;align-items:center;gap:6px;font-size:13px;padding:6px 12px;border-radius:20px;border:1.5px solid var(--border-strong);background:#fff;cursor:pointer;user-select:none;color:var(--text-muted);white-space:nowrap;}
+  .chip .dot{width:9px;height:9px;border-radius:50%;display:inline-block;}
+  .chip.active{color:#fff;border-color:transparent;}
+  .chip.active .dot{background:#fff !important;}
+  .chip[data-cat="kleding"].active{background:var(--kleding);}
+  .chip[data-cat="schoenen"].active{background:var(--schoenen);}
+  .chip[data-cat="accessoires"].active{background:var(--accessoires);}
+  .chip[data-cat="decoratie"].active{background:var(--decoratie);}
+  .chip[data-gender].active{background:var(--accent);}
+  .chip[data-fav].active{background:#e0a800;}
+  .chip-sep{flex:none;width:1px;background:var(--border);margin:2px 2px;}
+
+  /* Map */
+  #map{flex:1;min-height:0;}
+  .leaflet-popup-content-wrapper{border-radius:12px;}
+  .leaflet-popup-content{margin:12px 14px;font-size:13px;min-width:190px;}
+  .shop-cluster{background:#fff;border:2px solid var(--border-strong);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:12px;color:var(--text);}
+
+  /* Popup content */
+  .pop-title{font-size:15px;font-weight:600;margin:0 0 2px;}
+  .pop-sub{color:var(--text-muted);font-size:12.5px;margin:0 0 10px;}
+  .pop-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;}
+  .pop-btn{font-size:12px;padding:5px 9px;border-radius:8px;border:1px solid var(--border-strong);background:#fff;cursor:pointer;}
+  .pop-btn.on{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .pop-actions{display:flex;gap:6px;margin-top:6px;}
+  .pop-actions button{flex:1;font-size:12.5px;padding:7px 8px;border-radius:8px;border:1px solid var(--border-strong);background:#fafaf8;cursor:pointer;}
+  .pop-actions button.fav.on{background:#fff6dc;border-color:#e0a800;color:#8a6400;}
+  .pop-actions button.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .pop-del{margin-top:6px;width:100%;font-size:12px;color:var(--danger);background:none;border:none;cursor:pointer;padding:4px;}
+
+  /* Floating buttons */
+  #fabs{position:absolute;right:14px;bottom:22px;display:flex;flex-direction:column;gap:10px;z-index:900;}
+  .fab{width:52px;height:52px;border-radius:50%;background:var(--accent);color:#fff;border:none;font-size:22px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.25);cursor:pointer;position:relative;}
+  .fab.secondary{background:#fff;color:var(--text);border:1.5px solid var(--border-strong);}
+  .fab .badge{position:absolute;top:-4px;right:-4px;background:var(--danger);color:#fff;font-size:11px;font-weight:600;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;}
+
+  /* Sheets / panels */
+  .sheet-backdrop{position:fixed;inset:0;background:rgba(20,18,14,0.35);z-index:1400;display:none;}
+  .sheet-backdrop.open{display:block;}
+  .sheet{position:fixed;left:0;right:0;bottom:0;max-height:82vh;background:var(--panel);border-radius:18px 18px 0 0;z-index:1500;transform:translateY(100%);transition:transform .22s ease;display:flex;flex-direction:column;box-shadow:0 -4px 20px rgba(0,0,0,0.15);}
+  .sheet.open{transform:translateY(0);}
+  .sheet-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 8px;border-bottom:1px solid var(--border);}
+  .sheet-head h2{font-size:16px;margin:0;font-weight:600;}
+  .sheet-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted);padding:4px 8px;}
+  .sheet-body{padding:12px 16px 20px;overflow-y:auto;}
+
+  label.field{display:block;font-size:12.5px;color:var(--text-muted);margin:10px 0 4px;}
+  input[type=text],select,textarea{width:100%;height:38px;border-radius:8px;border:1px solid var(--border-strong);padding:0 10px;font-size:14px;background:#fbfaf7;color:var(--text);}
+  textarea{height:60px;padding:8px 10px;resize:vertical;}
+  .gender-check{display:flex;gap:8px;margin-top:4px;}
+  .gender-check label{display:flex;align-items:center;gap:5px;font-size:13px;border:1px solid var(--border-strong);border-radius:8px;padding:6px 10px;cursor:pointer;}
+  .catsel{display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;}
+  .catsel .opt{flex:1;min-width:80px;text-align:center;font-size:12.5px;padding:8px 6px;border-radius:8px;border:1.5px solid var(--border-strong);cursor:pointer;}
+  .catsel .opt.on{color:#fff;border-color:transparent;}
+  .catsel .opt[data-v="kleding"].on{background:var(--kleding);}
+  .catsel .opt[data-v="schoenen"].on{background:var(--schoenen);}
+  .catsel .opt[data-v="accessoires"].on{background:var(--accessoires);}
+  .catsel .opt[data-v="decoratie"].on{background:var(--decoratie);}
+
+  #placeHint{display:none;position:absolute;top:8px;left:50%;transform:translateX(-50%);background:var(--accent);color:#fff;font-size:13px;padding:8px 14px;border-radius:20px;z-index:1000;box-shadow:0 2px 8px rgba(0,0,0,.2);}
+  #placeHint.show{display:block;}
+
+  .btnrow{display:flex;gap:8px;margin-top:14px;}
+  .btnrow button{flex:1;height:40px;border-radius:9px;font-size:14px;border:1px solid var(--border-strong);background:#fff;cursor:pointer;}
+  .btnrow button.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .field-error{color:var(--danger);font-size:12px;margin-top:4px;display:none;}
+  .field-error.show{display:block;}
+
+  /* Route list */
+  #routeList{list-style:none;margin:0;padding:0;}
+  #routeList li{display:flex;align-items:center;gap:8px;padding:9px 4px;border-bottom:1px solid var(--border);background:#fff;}
+  #routeList li .grip{color:var(--text-muted);cursor:grab;font-size:16px;}
+  #routeList li .rname{flex:1;font-size:14px;}
+  #routeList li .rcat{width:9px;height:9px;border-radius:50%;flex:none;}
+  #routeList li .rrm{background:none;border:none;color:var(--text-muted);font-size:16px;cursor:pointer;padding:4px 6px;}
+  #routeEmpty{color:var(--text-muted);font-size:13.5px;padding:14px 0;text-align:center;}
+  #routeMeta{font-size:12.5px;color:var(--text-muted);margin-bottom:8px;}
+
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--accent);color:#fff;font-size:13.5px;padding:10px 16px;border-radius:10px;z-index:2000;box-shadow:0 2px 10px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s;}
+  .toast.show{opacity:1;}
+
+  #syncOverlay{position:fixed;inset:0;background:rgba(245,244,241,0.9);z-index:3000;display:none;align-items:center;justify-content:center;flex-direction:column;gap:10px;text-align:center;padding:24px;}
+  #syncOverlay.show{display:flex;}
+  #syncOverlay .spinner{width:34px;height:34px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--accent);animation:spin .8s linear infinite;}
+  #syncOverlay p{font-size:13.5px;color:var(--text-muted);max-width:280px;margin:0;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <h1>Shopmap</h1>
+    <input id="searchBox" type="text" placeholder="Zoek winkel of stad...">
+    <button class="iconbtn" id="syncBtn" title="Winkels verversen"><i>&#8635;</i></button>
+  </div>
+  <div id="filterbar">
+    <div class="chip active" data-cat="kleding"><span class="dot" style="background:var(--kleding)"></span>Kleding</div>
+    <div class="chip active" data-cat="schoenen"><span class="dot" style="background:var(--schoenen)"></span>Schoenen</div>
+    <div class="chip active" data-cat="accessoires"><span class="dot" style="background:var(--accessoires)"></span>Accessoires</div>
+    <div class="chip active" data-cat="decoratie"><span class="dot" style="background:var(--decoratie)"></span>Decoratie</div>
+    <div class="chip-sep"></div>
+    <div class="chip active" data-gender="dames">Dames</div>
+    <div class="chip active" data-gender="heren">Heren</div>
+    <div class="chip active" data-gender="kinderen">Kinderen</div>
+    <div class="chip active" data-gender="onbekend">Onbekend</div>
+    <div class="chip-sep"></div>
+    <div class="chip" data-fav>&#9733; Favorieten</div>
+  </div>
+  <div style="position:relative;flex:1;min-height:0;">
+    <div id="map"></div>
+    <div id="placeHint">Tik op de kaart om de winkel te plaatsen</div>
+    <div id="fabs">
+      <button class="fab secondary" id="routeFab">&#128663;<span class="badge" id="routeBadge" style="display:none">0</span></button>
+      <button class="fab" id="addFab">+</button>
+    </div>
+  </div>
+</div>
+
+<div class="sheet-backdrop" id="backdrop"></div>
+
+<div class="sheet" id="addSheet">
+  <div class="sheet-head"><h2>Winkel toevoegen</h2><button class="sheet-close" data-close>&times;</button></div>
+  <div class="sheet-body">
+    <label class="field">Naam</label>
+    <input type="text" id="f_name" placeholder="Naam van de winkel">
+    <div class="field-error" id="err_name">Vul een naam in</div>
+
+    <label class="field">Categorie</label>
+    <div class="catsel" id="f_cat">
+      <div class="opt" data-v="kleding">Kleding</div>
+      <div class="opt" data-v="schoenen">Schoenen</div>
+      <div class="opt" data-v="accessoires">Accessoires</div>
+      <div class="opt" data-v="decoratie">Decoratie</div>
+    </div>
+
+    <label class="field">Voor wie</label>
+    <div class="gender-check" id="f_gender">
+      <label><input type="checkbox" value="dames"> Dames</label>
+      <label><input type="checkbox" value="heren"> Heren</label>
+      <label><input type="checkbox" value="kinderen"> Kinderen</label>
+    </div>
+
+    <label class="field">Locatie</label>
+    <div class="btnrow" style="margin-top:0">
+      <button id="f_pickMap" type="button">Kies op kaart</button>
+      <button id="f_pickAddr" type="button">Zoek adres</button>
+    </div>
+    <input type="text" id="f_addr" placeholder="Straat, stad" style="margin-top:8px;display:none">
+    <div id="f_locStatus" style="font-size:12.5px;color:var(--text-muted);margin-top:6px;">Nog geen locatie gekozen</div>
+    <div class="field-error" id="err_loc">Kies eerst een locatie</div>
+
+    <label class="field">Stad</label>
+    <input type="text" id="f_city" placeholder="Stad (optioneel)">
+
+    <div class="btnrow">
+      <button data-close type="button">Annuleren</button>
+      <button class="primary" id="f_save" type="button">Opslaan</button>
+    </div>
+  </div>
+</div>
+
+<div class="sheet" id="routeSheet">
+  <div class="sheet-head"><h2>Mijn route</h2><button class="sheet-close" data-close>&times;</button></div>
+  <div class="sheet-body">
+    <div id="routeMeta"></div>
+    <ul id="routeList"></ul>
+    <div id="routeEmpty">Nog geen winkels toegevoegd. Tik op een winkel op de kaart en kies "+ route".</div>
+    <div class="btnrow">
+      <button id="routeClear" type="button">Route leegmaken</button>
+      <button class="primary" id="routeOpen" type="button">Open in Google Maps</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div id="syncOverlay"><div class="spinner"></div><p id="syncMsg">Winkels ophalen uit OpenStreetMap voor heel België. Dit kan tot een minuut duren, eenmalig.</p></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script>
+(function(){
+
+/* ---------- Config / Supabase ---------- */
+var supa = null;
+try{
+  if(window.SHOPMAP_CONFIG && window.SHOPMAP_CONFIG.url && window.SHOPMAP_CONFIG.anonKey){
+    supa = window.supabase.createClient(window.SHOPMAP_CONFIG.url, window.SHOPMAP_CONFIG.anonKey);
+  }
+}catch(e){ console.error('Supabase init failed', e); }
+var CLOUD = !!supa;
+
+/* ---------- Local fallback storage ---------- */
+var LS_KEY = 'shopmap_shops_v1';
+var LS_ROUTE_KEY = 'shopmap_route_v1';
+function lsGetShops(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)||'[]'); }catch(e){ return []; } }
+function lsSetShops(list){ localStorage.setItem(LS_KEY, JSON.stringify(list)); }
+
+/* ---------- State ---------- */
+var shops = {};            // id -> shop object
+var activeCats = new Set(['kleding','schoenen','accessoires','decoratie']);
+var activeGenders = new Set(['dames','heren','kinderen','onbekend']);
+var favOnly = false;
+var searchTerm = '';
+var route = [];            // array of shop ids, ordered
+var markers = {};          // id -> leaflet marker
+var pickMode = false;
+
+var CAT_COLORS = { kleding:'#378ADD', schoenen:'#D85A30', accessoires:'#7F77DD', decoratie:'#1D9E75' };
+
+/* ---------- Map ---------- */
+var map = L.map('map', { zoomControl:true, minZoom:7 }).setView([50.64, 4.66], 8);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© OpenStreetMap, © CARTO',
+  maxZoom: 19
+}).addTo(map);
+
+var cluster = L.markerClusterGroup({
+  maxClusterRadius: 45,
+  iconCreateFunction: function(c){
+    var n = c.getChildCount();
+    var size = n < 10 ? 32 : n < 50 ? 40 : 48;
+    return L.divIcon({ html:'<div class="shop-cluster" style="width:'+size+'px;height:'+size+'px;">'+n+'</div>', className:'', iconSize:[size,size] });
+  }
+});
+map.addLayer(cluster);
+
+function dotIcon(cat, isFav){
+  var color = CAT_COLORS[cat] || '#888';
+  var ring = isFav ? '#e0a800' : '#fff';
+  return L.divIcon({
+    className:'',
+    html:'<div style="width:18px;height:18px;border-radius:50%;background:'+color+';border:3px solid '+ring+';box-shadow:0 1px 3px rgba(0,0,0,.35);"></div>',
+    iconSize:[18,18], iconAnchor:[9,9], popupAnchor:[0,-9]
+  });
+}
+
+/* ---------- Gender helpers ---------- */
+function genderLabel(g){
+  if(!g || g.length===0) return 'Onbekend';
+  var map2 = { dames:'Dames', heren:'Heren', kinderen:'Kinderen' };
+  return g.map(function(x){return map2[x]||x;}).join(' + ');
+}
+function shopGenderKeys(shop){
+  return (shop.gender && shop.gender.length) ? shop.gender : ['onbekend'];
+}
+
+/* ---------- Rendering ---------- */
+function passesFilter(shop){
+  if(!activeCats.has(shop.category)) return false;
+  var gk = shopGenderKeys(shop);
+  var genderOk = gk.some(function(g){ return activeGenders.has(g); });
+  if(!genderOk) return false;
+  if(favOnly && !shop.is_favorite) return false;
+  if(searchTerm){
+    var t = (shop.name+' '+(shop.city||'')).toLowerCase();
+    if(t.indexOf(searchTerm)===-1) return false;
+  }
+  return true;
+}
+
+function renderAll(){
+  cluster.clearLayers();
+  markers = {};
+  Object.keys(shops).forEach(function(id){
+    var shop = shops[id];
+    if(!passesFilter(shop)) return;
+    var m = L.marker([shop.lat, shop.lng], { icon: dotIcon(shop.category, shop.is_favorite) });
+    m.on('click', function(){ openPopup(shop); });
+    markers[id] = m;
+    cluster.addLayer(m);
+  });
+  updateRouteBadge();
+}
+
+function openPopup(shop){
+  var gk = shopGenderKeys(shop);
+  var html = '<div class="pop-title">'+escapeHtml(shop.name)+'</div>';
+  html += '<div class="pop-sub">'+capitalize(shop.category)+(shop.city ? ' · '+escapeHtml(shop.city) : '')+'</div>';
+  html += '<div class="pop-row">';
+  ['dames','heren','kinderen'].forEach(function(g){
+    html += '<button class="pop-btn'+(gk.indexOf(g)>-1?' on':'')+'" data-g="'+g+'" data-id="'+shop.id+'">'+capitalize(g)+'</button>';
+  });
+  html += '</div>';
+  html += '<div class="pop-actions">';
+  html += '<button class="fav'+(shop.is_favorite?' on':'')+'" data-fav="'+shop.id+'">'+(shop.is_favorite?'★ Favoriet':'☆ Favoriet')+'</button>';
+  html += '<button class="primary" data-route="'+shop.id+'">'+(route.indexOf(shop.id)>-1 ? '✓ In route' : '+ Route')+'</button>';
+  html += '</div>';
+  if(shop.source==='user'){
+    html += '<button class="pop-del" data-del="'+shop.id+'">Winkel verwijderen</button>';
+  }
+  var popup = L.popup({ maxWidth:240 }).setLatLng([shop.lat, shop.lng]).setContent(html).openOn(map);
+
+  setTimeout(function(){
+    var el = document.querySelector('.leaflet-popup-content');
+    if(!el) return;
+    el.querySelectorAll('[data-g]').forEach(function(btn){
+      btn.addEventListener('click', function(){ toggleGender(shop.id, btn.getAttribute('data-g')); });
+    });
+    var favBtn = el.querySelector('[data-fav]');
+    if(favBtn) favBtn.addEventListener('click', function(){ toggleFavorite(shop.id); });
+    var routeBtn = el.querySelector('[data-route]');
+    if(routeBtn) routeBtn.addEventListener('click', function(){ toggleRoute(shop.id); map.closePopup(); });
+    var delBtn = el.querySelector('[data-del]');
+    if(delBtn) delBtn.addEventListener('click', function(){ deleteShop(shop.id); map.closePopup(); });
+  }, 0);
+}
+
+function capitalize(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+/* ---------- Mutations ---------- */
+function toggleGender(id, g){
+  var shop = shops[id]; if(!shop) return;
+  var gk = shop.gender.slice();
+  var idx = gk.indexOf(g);
+  if(idx>-1) gk.splice(idx,1); else gk.push(g);
+  shop.gender = gk;
+  shop.gender_is_override = true;
+  persistShop(shop);
+  openPopup(shop);
+  renderAll();
+}
+function toggleFavorite(id){
+  var shop = shops[id]; if(!shop) return;
+  shop.is_favorite = !shop.is_favorite;
+  persistShop(shop);
+  openPopup(shop);
+  renderAll();
+}
+function toggleRoute(id){
+  var i = route.indexOf(id);
+  if(i>-1) route.splice(i,1); else route.push(id);
+  saveRouteLocal();
+  updateRouteBadge();
+  renderRouteList();
+  showToast(i>-1 ? 'Uit route verwijderd' : 'Toegevoegd aan route');
+}
+function deleteShop(id){
+  if(!confirm('Deze winkel verwijderen?')) return;
+  delete shops[id];
+  var ri = route.indexOf(id);
+  if(ri>-1){ route.splice(ri,1); saveRouteLocal(); }
+  if(CLOUD){ supa.from('shops').delete().eq('id', id).then(function(){}); }
+  else { lsSetShops(Object.values(shops)); }
+  renderAll(); renderRouteList();
+  showToast('Winkel verwijderd');
+}
+
+function persistShop(shop){
+  shop.updated_at = new Date().toISOString();
+  if(CLOUD){
+    supa.from('shops').upsert(shop, { onConflict:'id' }).then(function(res){
+      if(res.error) console.error(res.error);
+    });
+  } else {
+    lsSetShops(Object.values(shops));
+  }
+}
+
+/* ---------- Route ---------- */
+function updateRouteBadge(){
+  var b = document.getElementById('routeBadge');
+  if(route.length>0){ b.style.display='flex'; b.textContent=route.length; }
+  else { b.style.display='none'; }
+}
+function saveRouteLocal(){
+  localStorage.setItem(LS_ROUTE_KEY, JSON.stringify(route));
+  if(CLOUD){
+    supa.from('routes').upsert({ id: getRouteCloudId(), name:'Mijn route', shop_ids: route }, { onConflict:'id' }).then(function(){});
+  }
+}
+function getRouteCloudId(){
+  var id = localStorage.getItem('shopmap_route_cloud_id');
+  if(!id){
+    id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'route-'+Date.now();
+    localStorage.setItem('shopmap_route_cloud_id', id);
+  }
+  return id;
+}
+function renderRouteList(){
+  var ul = document.getElementById('routeList');
+  var empty = document.getElementById('routeEmpty');
+  var meta = document.getElementById('routeMeta');
+  ul.innerHTML = '';
+  if(route.length===0){ empty.style.display='block'; meta.textContent=''; return; }
+  empty.style.display='none';
+  meta.textContent = route.length + ' winkel(s) in je route. Sleep om te herschikken.';
+  route.forEach(function(id){
+    var shop = shops[id];
+    if(!shop) return;
+    var li = document.createElement('li');
+    li.setAttribute('data-id', id);
+    li.innerHTML = '<span class="grip">☰</span><span class="rcat" style="background:'+CAT_COLORS[shop.category]+'"></span><span class="rname">'+escapeHtml(shop.name)+(shop.city?' — '+escapeHtml(shop.city):'')+'</span><button class="rrm" data-rm="'+id+'">✕</button>';
+    ul.appendChild(li);
+  });
+  ul.querySelectorAll('[data-rm]').forEach(function(btn){
+    btn.addEventListener('click', function(){ toggleRoute(btn.getAttribute('data-rm')); });
+  });
+}
+new Sortable(document.getElementById('routeList'), {
+  handle:'.grip', animation:150,
+  onEnd:function(){
+    var ids = Array.prototype.map.call(document.getElementById('routeList').children, function(li){ return li.getAttribute('data-id'); });
+    route = ids;
+    saveRouteLocal();
+  }
+});
+
+function openInGoogleMaps(){
+  if(route.length===0){ showToast('Voeg eerst winkels toe aan je route'); return; }
+  var pts = route.map(function(id){ return shops[id]; }).filter(Boolean);
+  var CHUNK = 9; // origin + up to 8 waypoints + destination per url, safe under Google's limit
+  var i = 0, part = 1;
+  while(i < pts.length){
+    var slice = pts.slice(i, i+CHUNK);
+    if(slice.length===1){
+      var only = slice[0];
+      window.open('https://www.google.com/maps/search/?api=1&query='+only.lat+','+only.lng, '_blank');
+    } else {
+      var origin = slice[0];
+      var dest = slice[slice.length-1];
+      var waypoints = slice.slice(1,-1).map(function(s){ return s.lat+','+s.lng; }).join('|');
+      var url = 'https://www.google.com/maps/dir/?api=1&origin='+origin.lat+','+origin.lng+'&destination='+dest.lat+','+dest.lng;
+      if(waypoints) url += '&waypoints='+encodeURIComponent(waypoints);
+      url += '&travelmode=driving';
+      window.open(url, '_blank');
+    }
+    i += CHUNK;
+    part++;
+  }
+  if(pts.length > CHUNK){
+    showToast('Route opgesplitst in meerdere Google Maps-schermen (max '+CHUNK+' stops per keer)');
+  }
+}
+
+/* ---------- Add shop flow ---------- */
+var newShopLoc = null;
+var genderBoxes = document.querySelectorAll('#f_gender input');
+var catOpts = document.querySelectorAll('#f_cat .opt');
+var selectedCat = null;
+
+catOpts.forEach(function(opt){
+  opt.addEventListener('click', function(){
+    catOpts.forEach(function(o){ o.classList.remove('on'); });
+    opt.classList.add('on');
+    selectedCat = opt.getAttribute('data-v');
+  });
+});
+
+document.getElementById('f_pickMap').addEventListener('click', function(){
+  closeSheets();
+  pickMode = true;
+  document.getElementById('placeHint').classList.add('show');
+});
+map.on('click', function(e){
+  if(!pickMode) return;
+  pickMode = false;
+  document.getElementById('placeHint').classList.remove('show');
+  newShopLoc = { lat: e.latlng.lat, lng: e.latlng.lng };
+  document.getElementById('f_locStatus').textContent = 'Locatie gekozen op kaart ✓';
+  openSheet('addSheet');
+});
+
+document.getElementById('f_pickAddr').addEventListener('click', function(){
+  var box = document.getElementById('f_addr');
+  box.style.display = box.style.display==='none' ? 'block' : 'none';
+  if(box.style.display==='block') box.focus();
+});
+var addrTimer = null;
+document.getElementById('f_addr').addEventListener('input', function(){
+  var v = this.value;
+  clearTimeout(addrTimer);
+  if(v.trim().length < 4) return;
+  addrTimer = setTimeout(function(){ geocodeAddress(v); }, 700);
+});
+function geocodeAddress(q){
+  document.getElementById('f_locStatus').textContent = 'Adres zoeken...';
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=be&q='+encodeURIComponent(q))
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if(res && res[0]){
+        newShopLoc = { lat: parseFloat(res[0].lat), lng: parseFloat(res[0].lon) };
+        document.getElementById('f_locStatus').textContent = 'Gevonden: '+res[0].display_name.split(',').slice(0,3).join(',');
+      } else {
+        document.getElementById('f_locStatus').textContent = 'Geen adres gevonden, probeer "Kies op kaart"';
+      }
+    })
+    .catch(function(){ document.getElementById('f_locStatus').textContent = 'Zoeken mislukt, probeer "Kies op kaart"'; });
+}
+
+document.getElementById('f_save').addEventListener('click', function(){
+  var name = document.getElementById('f_name').value.trim();
+  var errName = document.getElementById('err_name');
+  var errLoc = document.getElementById('err_loc');
+  errName.classList.remove('show'); errLoc.classList.remove('show');
+  var ok = true;
+  if(!name){ errName.classList.add('show'); ok = false; }
+  if(!newShopLoc){ errLoc.classList.add('show'); ok = false; }
+  if(!selectedCat) selectedCat = 'kleding';
+  if(!ok) return;
+
+  var genders = Array.prototype.filter.call(genderBoxes, function(b){ return b.checked; }).map(function(b){ return b.value; });
+  var id = 'user-' + ((window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now());
+  var shop = {
+    id: id, source:'user', name:name, category:selectedCat, gender:genders,
+    gender_is_override:true, lat:newShopLoc.lat, lng:newShopLoc.lng,
+    city: document.getElementById('f_city').value.trim() || null,
+    address:null, is_favorite:false, notes:null,
+    created_at:new Date().toISOString(), updated_at:new Date().toISOString()
+  };
+  shops[id] = shop;
+  persistShop(shop);
+  renderAll();
+  closeSheets();
+  resetAddForm();
+  showToast('Winkel toegevoegd');
+});
+function resetAddForm(){
+  document.getElementById('f_name').value = '';
+  document.getElementById('f_city').value = '';
+  document.getElementById('f_addr').value = '';
+  document.getElementById('f_addr').style.display = 'none';
+  document.getElementById('f_locStatus').textContent = 'Nog geen locatie gekozen';
+  genderBoxes.forEach(function(b){ b.checked = false; });
+  catOpts.forEach(function(o){ o.classList.remove('on'); });
+  selectedCat = null;
+  newShopLoc = null;
+}
+
+/* ---------- Sheets ---------- */
+function openSheet(id){
+  document.getElementById('backdrop').classList.add('open');
+  document.getElementById(id).classList.add('open');
+}
+function closeSheets(){
+  document.getElementById('backdrop').classList.remove('open');
+  document.querySelectorAll('.sheet').forEach(function(s){ s.classList.remove('open'); });
+  pickMode = false;
+  document.getElementById('placeHint').classList.remove('show');
+}
+document.getElementById('backdrop').addEventListener('click', closeSheets);
+document.querySelectorAll('[data-close]').forEach(function(b){ b.addEventListener('click', closeSheets); });
+document.getElementById('addFab').addEventListener('click', function(){ resetAddForm(); openSheet('addSheet'); });
+document.getElementById('routeFab').addEventListener('click', function(){ renderRouteList(); openSheet('routeSheet'); });
+document.getElementById('routeOpen').addEventListener('click', openInGoogleMaps);
+document.getElementById('routeClear').addEventListener('click', function(){
+  if(route.length===0) return;
+  if(!confirm('Volledige route leegmaken?')) return;
+  route = []; saveRouteLocal(); updateRouteBadge(); renderRouteList();
+});
+
+/* ---------- Filters ---------- */
+document.querySelectorAll('.chip[data-cat]').forEach(function(chip){
+  chip.addEventListener('click', function(){
+    var c = chip.getAttribute('data-cat');
+    if(activeCats.has(c)) activeCats.delete(c); else activeCats.add(c);
+    chip.classList.toggle('active');
+    renderAll();
+  });
+});
+document.querySelectorAll('.chip[data-gender]').forEach(function(chip){
+  chip.addEventListener('click', function(){
+    var g = chip.getAttribute('data-gender');
+    if(activeGenders.has(g)) activeGenders.delete(g); else activeGenders.add(g);
+    chip.classList.toggle('active');
+    renderAll();
+  });
+});
+document.querySelector('.chip[data-fav]').addEventListener('click', function(){
+  favOnly = !favOnly;
+  this.classList.toggle('active');
+  renderAll();
+});
+document.getElementById('searchBox').addEventListener('input', function(){
+  searchTerm = this.value.trim().toLowerCase();
+  renderAll();
+});
+
+/* ---------- Toast ---------- */
+var toastTimer = null;
+function showToast(msg){
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 2200);
+}
+
+/* ---------- Overpass sync ---------- */
+var SHOP_TAGS = {
+  clothes:'kleding', boutique:'kleding',
+  shoes:'schoenen',
+  bag:'accessoires', jewelry:'accessoires', watches:'accessoires', leather:'accessoires', accessories:'accessoires', fashion_accessories:'accessoires',
+  interior_decoration:'decoratie', houseware:'decoratie', curtain:'decoratie', candles:'decoratie', carpet:'decoratie'
+};
+function buildOverpassQuery(){
+  var clauses = Object.keys(SHOP_TAGS).map(function(tag){ return 'nwr["shop"="'+tag+'"](area.be);'; }).join('\n  ');
+  return '[out:json][timeout:180];\narea["ISO3166-1"="BE"][admin_level=2]->.be;\n(\n  '+clauses+'\n);\nout center tags;';
+}
+function parseGender(tags){
+  var g = [];
+  if(tags['clothes:women']==='yes' || tags['for']==='women') g.push('dames');
+  if(tags['clothes:men']==='yes' || tags['for']==='men') g.push('heren');
+  if(tags['clothes:children']==='yes' || tags['for']==='children' || tags['clothes:kids']==='yes') g.push('kinderen');
+  return g;
+}
+function overpassToShop(el){
+  var tags = el.tags || {};
+  var cat = SHOP_TAGS[tags.shop];
+  if(!cat) return null;
+  var lat = el.type==='node' ? el.lat : (el.center && el.center.lat);
+  var lng = el.type==='node' ? el.lon : (el.center && el.center.lon);
+  if(lat==null || lng==null) return null;
+  var name = tags.name || tags.brand || 'Naamloze winkel';
+  var city = tags['addr:city'] || tags['addr:town'] || tags['addr:suburb'] || null;
+  return {
+    id: 'osm-'+el.type+'-'+el.id,
+    source:'osm', name:name, category:cat, gender: parseGender(tags), gender_is_override:false,
+    lat:lat, lng:lng, city:city, address: tags['addr:street'] ? (tags['addr:street']+' '+(tags['addr:housenumber']||'')).trim() : null,
+    is_favorite:false, notes:null, created_at:new Date().toISOString(), updated_at:new Date().toISOString()
+  };
+}
+
+function syncFromOverpass(){
+  var btn = document.getElementById('syncBtn');
+  btn.classList.add('syncing');
+  document.getElementById('syncOverlay').classList.add('show');
+  fetch('https://overpass-api.de/api/interpreter', { method:'POST', body: buildOverpassQuery() })
+    .then(function(r){
+      if(!r.ok) throw new Error('Overpass fout ' + r.status);
+      return r.json();
+    })
+    .then(function(data){
+      var fresh = {};
+      (data.elements||[]).forEach(function(el){
+        var s = overpassToShop(el);
+        if(s) fresh[s.id] = s;
+      });
+      // Merge: keep user overrides (favorite, gender_is_override, is_favorite) for shops still present
+      var toUpsert = [];
+      Object.keys(fresh).forEach(function(id){
+        var existing = shops[id];
+        var s = fresh[id];
+        if(existing){
+          s.is_favorite = existing.is_favorite;
+          if(existing.gender_is_override){ s.gender = existing.gender; s.gender_is_override = true; }
+        }
+        shops[id] = s;
+        toUpsert.push(s);
+      });
+      showToast(toUpsert.length + ' winkels opgehaald uit OpenStreetMap');
+      if(CLOUD){
+        return batchUpsert(toUpsert);
+      } else {
+        // keep user-added shops (non-osm) intact in localStorage
+        var userShops = Object.values(shops).filter(function(s){ return s.source==='user'; });
+        lsSetShops(toUpsert.concat(userShops));
+      }
+    })
+    .then(function(){
+      if(CLOUD){
+        supa.from('sync_state').upsert({ key:'osm_last_sync', value:{ at:new Date().toISOString() } }, { onConflict:'key' }).then(function(){});
+      }
+      renderAll();
+    })
+    .catch(function(err){
+      console.error(err);
+      showToast('Ophalen mislukt. Probeer later opnieuw.');
+    })
+    .finally(function(){
+      btn.classList.remove('syncing');
+      document.getElementById('syncOverlay').classList.remove('show');
+    });
+}
+function batchUpsert(list){
+  var BATCH = 500;
+  var chain = Promise.resolve();
+  for(var i=0;i<list.length;i+=BATCH){
+    (function(slice){
+      chain = chain.then(function(){ return supa.from('shops').upsert(slice, { onConflict:'id' }); });
+    })(list.slice(i,i+BATCH));
+  }
+  return chain;
+}
+document.getElementById('syncBtn').addEventListener('click', function(){
+  if(confirm('Winkeldata verversen uit OpenStreetMap? Dit overschrijft geen favorieten of eigen aanpassingen.')) syncFromOverpass();
+});
+
+/* ---------- Load ---------- */
+function loadShops(){
+  if(CLOUD){
+    return supa.from('shops').select('*').then(function(res){
+      if(res.error){ console.error(res.error); return; }
+      (res.data||[]).forEach(function(s){ shops[s.id] = s; });
+    });
+  } else {
+    lsGetShops().forEach(function(s){ shops[s.id] = s; });
+    return Promise.resolve();
+  }
+}
+function loadRoute(){
+  if(CLOUD){
+    var cid = getRouteCloudId();
+    return supa.from('routes').select('*').eq('id', cid).then(function(res){
+      if(res.data && res.data[0]) route = res.data[0].shop_ids || [];
+    });
+  } else {
+    try{ route = JSON.parse(localStorage.getItem(LS_ROUTE_KEY)||'[]'); }catch(e){ route = []; }
+    return Promise.resolve();
+  }
+}
+
+Promise.all([loadShops(), loadRoute()]).then(function(){
+  renderAll();
+  renderRouteList();
+  if(Object.keys(shops).filter(function(id){ return shops[id].source==='osm'; }).length === 0){
+    syncFromOverpass();
+  }
+  if(!CLOUD){
+    showToast('Geen Supabase gekoppeld — gegevens blijven lokaal op dit toestel');
+  }
+});
+
+})();
+</script>
+</body>
+</html>
