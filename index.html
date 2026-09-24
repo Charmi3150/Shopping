@@ -638,17 +638,20 @@ function buildOverpassQuery(){
   var values = Object.keys(SHOP_TAGS).join('|');
   return '[out:json][timeout:90];\narea["ISO3166-1"="BE"][admin_level=2]->.be;\nnwr["shop"~"^('+values+')$"](area.be);\nout center tags;';
 }
-function fetchOverpass(query, idx){
+function fetchOverpass(query, idx, lastErr){
   idx = idx || 0;
-  if(idx >= OVERPASS_ENDPOINTS.length) return Promise.reject(new Error('geen-enkele-server-bereikbaar'));
-  return fetch(OVERPASS_ENDPOINTS[idx], { method:'POST', body: query })
+  if(idx >= OVERPASS_ENDPOINTS.length) return Promise.reject(lastErr || new Error('geen-enkele-server-bereikbaar'));
+  // GET met data= querystring i.p.v. POST: dit is hoe overpass-turbo het zelf doet,
+  // en werkt betrouwbaarder cross-origin vanuit de browser dan een raw POST-body.
+  var url = OVERPASS_ENDPOINTS[idx] + '?data=' + encodeURIComponent(query);
+  return fetch(url, { method:'GET' })
     .then(function(r){
       if(!r.ok) return r.text().then(function(t){ throw new Error('HTTP ' + r.status + (t ? ': ' + t.slice(0,150) : '')); });
       return r.json();
     })
     .catch(function(err){
       console.warn('Overpass endpoint faalde: ' + OVERPASS_ENDPOINTS[idx], err);
-      return fetchOverpass(query, idx + 1);
+      return fetchOverpass(query, idx + 1, err);
     });
 }
 function parseGender(tags){
