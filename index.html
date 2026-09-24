@@ -613,12 +613,12 @@ document.getElementById('searchBox').addEventListener('input', function(){
 
 /* ---------- Toast ---------- */
 var toastTimer = null;
-function showToast(msg){
+function showToast(msg, duration){
   var t = document.getElementById('toast');
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 2200);
+  toastTimer = setTimeout(function(){ t.classList.remove('show'); }, duration || 2200);
 }
 
 /* ---------- Overpass sync ---------- */
@@ -628,9 +628,28 @@ var SHOP_TAGS = {
   bag:'accessoires', jewelry:'accessoires', watches:'accessoires', leather:'accessoires', accessories:'accessoires', fashion_accessories:'accessoires',
   interior_decoration:'decoratie', houseware:'decoratie', curtain:'decoratie', candles:'decoratie', carpet:'decoratie'
 };
+var OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.openstreetmap.ru/api/interpreter'
+];
 function buildOverpassQuery(){
-  var clauses = Object.keys(SHOP_TAGS).map(function(tag){ return 'nwr["shop"="'+tag+'"](area.be);'; }).join('\n  ');
-  return '[out:json][timeout:180];\narea["ISO3166-1"="BE"][admin_level=2]->.be;\n(\n  '+clauses+'\n);\nout center tags;';
+  // één regex-pass ipv 14 losse scans: sneller en minder kans op timeout/rate-limit
+  var values = Object.keys(SHOP_TAGS).join('|');
+  return '[out:json][timeout:90];\narea["ISO3166-1"="BE"][admin_level=2]->.be;\nnwr["shop"~"^('+values+')$"](area.be);\nout center tags;';
+}
+function fetchOverpass(query, idx){
+  idx = idx || 0;
+  if(idx >= OVERPASS_ENDPOINTS.length) return Promise.reject(new Error('geen-enkele-server-bereikbaar'));
+  return fetch(OVERPASS_ENDPOINTS[idx], { method:'POST', body: query })
+    .then(function(r){
+      if(!r.ok) return r.text().then(function(t){ throw new Error('HTTP ' + r.status + (t ? ': ' + t.slice(0,150) : '')); });
+      return r.json();
+    })
+    .catch(function(err){
+      console.warn('Overpass endpoint faalde: ' + OVERPASS_ENDPOINTS[idx], err);
+      return fetchOverpass(query, idx + 1);
+    });
 }
 function parseGender(tags){
   var g = [];
@@ -660,11 +679,7 @@ function syncFromOverpass(){
   var btn = document.getElementById('syncBtn');
   btn.classList.add('syncing');
   document.getElementById('syncOverlay').classList.add('show');
-  fetch('https://overpass-api.de/api/interpreter', { method:'POST', body: buildOverpassQuery() })
-    .then(function(r){
-      if(!r.ok) throw new Error('Overpass fout ' + r.status);
-      return r.json();
-    })
+  fetchOverpass(buildOverpassQuery())
     .then(function(data){
       var fresh = {};
       (data.elements||[]).forEach(function(el){
@@ -700,7 +715,8 @@ function syncFromOverpass(){
     })
     .catch(function(err){
       console.error(err);
-      showToast('Ophalen mislukt. Probeer later opnieuw.');
+      var msg = (err && err.message) ? err.message : String(err);
+      showToast('Ophalen mislukt (' + msg.slice(0,80) + '). Tik op ↻ om opnieuw te proberen.', 6000);
     })
     .finally(function(){
       btn.classList.remove('syncing');
